@@ -4,6 +4,8 @@ import os
 import math
 import random
 import time
+import json
+from settings import load_settings, save_settings
 
 # Initialize Pygame
 pygame.init()
@@ -31,7 +33,7 @@ small_font = pygame.font.SysFont(None, 32)
 
 # Load menu music
 ASSET_PATH = os.path.join(os.path.dirname(__file__), "assets")
-MENU_MUSIC_PATH = os.path.join(ASSET_PATH, "Clair Obscur Expedition 33 Lumière [Official Music Video].mp3")  # Change filename as needed
+MENU_MUSIC_PATH = os.path.join(ASSET_PATH, "Bocchi the Rock! - Guitar, Loneliness and Blue Planet [instrumental] (ギターと孤独と蒼い惑星, 기타와 고독과 푸른 행성).mp3")  # Change filename as needed
 
 if os.path.exists(MENU_MUSIC_PATH):
     pygame.mixer.music.load(MENU_MUSIC_PATH)
@@ -90,6 +92,19 @@ class Slider:
     def get_value(self):
         return self.value
 
+def get_key_state(settings):
+    """Return a dict mapping action names to whether their key is pressed."""
+    pressed = pygame.key.get_pressed()
+    keymap = {}
+    for action, keyname in settings["key_bindings"].items():
+        try:
+            key_const = getattr(pygame, f'K_{keyname.lower()}')
+        except AttributeError:
+            # fallback for special keys
+            key_const = pygame.key.key_code(keyname)
+        keymap[action] = pressed[key_const]
+    return keymap
+
 # Player class for bullet hell movement
 class Player:
     def __init__(self, x, y):
@@ -104,17 +119,17 @@ class Player:
         self.hitbox_radius = 4
         self.alive = True
 
-    def handle_input(self, keys):
+    def handle_input(self, keymap):
         if not self.alive:
             return
         dx, dy = 0, 0
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+        if keymap.get("move_left"):
             dx -= 1
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+        if keymap.get("move_right"):
             dx += 1
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
+        if keymap.get("move_up"):
             dy -= 1
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+        if keymap.get("move_down"):
             dy += 1
         if dx != 0 and dy != 0:
             dx *= 0.7071
@@ -124,16 +139,16 @@ class Player:
         self.x = max(self.radius, min(WIDTH - self.radius, self.x))
         self.y = max(self.radius, min(HEIGHT - self.radius, self.y))
 
-    def dash(self, keys):
+    def dash(self, keymap):
         if self.dash_timer == 0 and self.alive:
             dx, dy = 0, 0
-            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            if keymap.get("move_left"):
                 dx -= 1
-            if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            if keymap.get("move_right"):
                 dx += 1
-            if keys[pygame.K_UP] or keys[pygame.K_w]:
+            if keymap.get("move_up"):
                 dy -= 1
-            if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+            if keymap.get("move_down"):
                 dy += 1
             if dx == 0 and dy == 0:
                 dy = -1
@@ -260,6 +275,7 @@ LEVEL_PATTERNS = [
 MENU = "menu"
 GAME = "game"
 SETTINGS = "settings"
+BUTTON_BINDS = "button_binds"
 state = MENU
 
 # Button positions
@@ -277,7 +293,7 @@ slider_x = (WIDTH - slider_width) // 2
 slider_y = HEIGHT // 2 - 40
 volume_slider = Slider(slider_x, slider_y, slider_width, slider_height, 0.0, 1.0, 0.5)
 
-binds_button = Button("Button Binds (Coming Soon)", slider_x, slider_y + 60, slider_width, 40)
+binds_button = Button("Control Binds", slider_x, slider_y + 60, slider_width, 40)
 
 def draw_menu():
     screen.fill(DARK_GRAY)
@@ -298,9 +314,70 @@ def draw_settings():
     esc_text = small_font.render("Press ESC to return", True, WHITE)
     screen.blit(esc_text, (WIDTH // 2 - esc_text.get_width() // 2, HEIGHT - 60))
 
+def draw_button_binds(settings, selected_action):
+    screen.fill((20, 20, 40))
+    title = font.render("Control Binds", True, WHITE)
+    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 60))
+    y = 160
+    x = WIDTH // 2 - 200
+    for action, key in settings["key_bindings"].items():
+        action_name = action.replace("_", " ").capitalize()
+        if selected_action == action:
+            color = BLUE
+        else:
+            color = WHITE
+        action_text = small_font.render(f"{action_name}:", True, color)
+        key_text = small_font.render(f"{key.upper()}", True, color)
+        screen.blit(action_text, (x, y))
+        pygame.draw.rect(screen, color, (x + 220, y, 120, 36), 2 if selected_action == action else 1)
+        screen.blit(key_text, (x + 230, y))
+        y += 60
+    esc_text = small_font.render("Press ESC to return", True, WHITE)
+    screen.blit(esc_text, (WIDTH // 2 - esc_text.get_width() // 2, HEIGHT - 60))
+
+def button_binds_menu(settings):
+    running = True
+    selected_action = None
+    actions = list(settings["key_bindings"].keys())
+    action_rects = []
+    x = WIDTH // 2 - 200
+    y = 160
+    for action in actions:
+        rect = pygame.Rect(x + 220, y, 120, 36)
+        action_rects.append((action, rect))
+        y += 60
+
+    while running:
+        clock.tick(FPS)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if selected_action is None:
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    running = False
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mouse_pos = pygame.mouse.get_pos()
+                    for action, rect in action_rects:
+                        if rect.collidepoint(mouse_pos):
+                            selected_action = action
+                            break
+            else:
+                if event.type == pygame.KEYDOWN:
+                    # Update the key binding
+                    key_name = pygame.key.name(event.key)
+                    settings["key_bindings"][selected_action] = key_name
+                    from settings import save_settings
+                    save_settings(settings)
+                    selected_action = None
+
+        draw_button_binds(settings, selected_action)
+        pygame.display.flip()
+
 def bullet_hell_game():
     if pygame.mixer.music.get_busy():
         pygame.mixer.music.stop()
+    settings = load_settings()
     player = Player(WIDTH // 2, HEIGHT // 2)
     level_index = 0
     level = Level(LEVEL_PATTERNS[level_index])
@@ -309,7 +386,6 @@ def bullet_hell_game():
     death_time = 0
     show_death_screen = False
 
-    # Death screen buttons
     btn_width, btn_height = 220, 60
     retry_btn = Button("Retry", WIDTH // 2 - btn_width // 2, HEIGHT // 2 + 40, btn_width, btn_height)
     quit_btn = Button("Quit to Menu", WIDTH // 2 - btn_width // 2, HEIGHT // 2 + 120, btn_width, btn_height)
@@ -322,11 +398,17 @@ def bullet_hell_game():
                 sys.exit()
             if not death and not show_death_screen:
                 if event.type == pygame.KEYDOWN:
+                    # Use the dash key from settings
+                    dash_key = settings["key_bindings"].get("dash", "space")
+                    try:
+                        dash_key_const = getattr(pygame, f'K_{dash_key.lower()}')
+                    except AttributeError:
+                        dash_key_const = pygame.key.key_code(dash_key)
                     if event.key == pygame.K_ESCAPE:
                         running = False
-                    if event.key == pygame.K_SPACE:
-                        keys = pygame.key.get_pressed()
-                        player.dash(keys)
+                    if event.key == dash_key_const:
+                        keymap = get_key_state(settings)
+                        player.dash(keymap)
                     if event.key == pygame.K_TAB:
                         level_index = (level_index + 1) % len(LEVEL_PATTERNS)
                         level = Level(LEVEL_PATTERNS[level_index])
@@ -336,14 +418,13 @@ def bullet_hell_game():
                     retry_btn.update(mouse_pos)
                     quit_btn.update(mouse_pos)
                     if retry_btn.is_hovered(mouse_pos):
-                        # Restart game
                         return bullet_hell_game()
                     elif quit_btn.is_hovered(mouse_pos):
-                        return  # Return to menu
+                        return
 
         if not death and not show_death_screen:
-            keys = pygame.key.get_pressed()
-            player.handle_input(keys)
+            keymap = get_key_state(settings)
+            player.handle_input(keymap)
             player.update_dash_timer()
             level.update(player)
             if player.is_hit(level.lasers):
@@ -351,7 +432,6 @@ def bullet_hell_game():
                 death = True
                 death_time = pygame.time.get_ticks()
         elif death and not show_death_screen:
-            # Wait 1 second before showing death screen
             if pygame.time.get_ticks() - death_time > 1000:
                 show_death_screen = True
 
@@ -361,12 +441,11 @@ def bullet_hell_game():
 
         if not death and not show_death_screen:
             info_text = small_font.render(
-                "Move: Arrow keys/WASD | Dash: SPACE | Next Pattern: TAB | ESC: Menu", True, WHITE)
+                "Move: Your binds | Dash: Your bind | Next Pattern: TAB | ESC: Menu", True, WHITE)
             screen.blit(info_text, (WIDTH // 2 - info_text.get_width() // 2, HEIGHT - 40))
             level_text = small_font.render(f"Pattern {level_index + 1}/{len(LEVEL_PATTERNS)}", True, WHITE)
             screen.blit(level_text, (10, HEIGHT - 40))
         elif show_death_screen:
-            # Draw death screen
             overlay = pygame.Surface((WIDTH, HEIGHT))
             overlay.set_alpha(180)
             overlay.fill((0, 0, 0))
@@ -382,6 +461,9 @@ def bullet_hell_game():
 
 def main():
     global state
+    # Load settings at start
+    from settings import load_settings, save_settings
+    settings = load_settings()
     running = True
     while running:
         clock.tick(FPS)
@@ -392,8 +474,7 @@ def main():
             if state == MENU:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if start_button.is_hovered(pygame.mouse.get_pos()):
-                        bullet_hell_game()  # Start bullet hell game when Start is pressed
-                        # After game ends, return to menu and restart music
+                        bullet_hell_game()
                         if os.path.exists(MENU_MUSIC_PATH):
                             pygame.mixer.music.load(MENU_MUSIC_PATH)
                             pygame.mixer.music.play(-1)
@@ -404,6 +485,10 @@ def main():
 
             elif state == SETTINGS:
                 volume_slider.handle_event(event)
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if binds_button.is_hovered(pygame.mouse.get_pos()):
+                        # Open button binds menu
+                        button_binds_menu(settings)
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     state = MENU
 
@@ -421,6 +506,6 @@ def main():
 
     pygame.quit()
     sys.exit()
-
+    
 if __name__ == "__main__":
     main()

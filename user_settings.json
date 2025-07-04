@@ -1,0 +1,13 @@
+{
+    "volume": 0.8,
+    "screen_width": 800,
+    "screen_height": 600,
+    "fullscreen": false,
+    "key_bindings": {
+        "move_left": "q",
+        "move_right": "d",
+        "move_up": "z",
+        "move_down": "s",
+        "dash": "left shift"
+    }
+}
