@@ -6,6 +6,7 @@ import random
 import time
 import json
 from settings import load_settings, save_settings
+from game_patterns import LEVEL_PATTERNS, PatternSwitcher
 
 # Initialize Pygame
 pygame.init()
@@ -193,31 +194,7 @@ class Player:
             if dist <= self.hitbox_radius + laser.width // 2:
                 return True
         return False
-
-class Laser:
-    def __init__(self, x, y, angle, speed=6, color=RED, width=4, length=32):
-        self.x = x
-        self.y = y
-        self.angle = angle  # in radians
-        self.speed = speed
-        self.color = color
-        self.width = width
-        self.length = length
-        self.active = True
-
-    def update(self):
-        self.x += math.cos(self.angle) * self.speed
-        self.y += math.sin(self.angle) * self.speed
-        # Deactivate if out of screen
-        if (self.x < -self.length or self.x > WIDTH + self.length or
-            self.y < -self.length or self.y > HEIGHT + self.length):
-            self.active = False
-
-    def draw(self, surface):
-        end_x = self.x + math.cos(self.angle) * self.length
-        end_y = self.y + math.sin(self.angle) * self.length
-        pygame.draw.line(surface, self.color, (self.x, self.y), (end_x, end_y), self.width)
-
+    
 class Level:
     def __init__(self, pattern_func):
         self.pattern_func = pattern_func
@@ -239,38 +216,6 @@ class Level:
     def draw(self, surface):
         for laser in self.lasers:
             laser.draw(surface)
-
-# Example pattern functions
-def pattern_simple_radial(frame):
-    lasers = []
-    if frame % 60 == 0:  # Every second
-        center_x, center_y = WIDTH // 2, 100
-        for i in range(8):
-            angle = i * (2 * math.pi / 8)
-            lasers.append(Laser(center_x, center_y, angle))
-    return lasers
-
-def pattern_sweeping(frame):
-    lasers = []
-    if frame % 10 == 0:
-        angle = math.pi / 2 + math.sin(frame / 60) * math.pi / 4
-        lasers.append(Laser(random.randint(100, WIDTH-100), 0, angle, speed=8, color=BLUE, width=6, length=48))
-    return lasers
-
-def pattern_random_burst(frame):
-    lasers = []
-    if frame % 90 == 0:
-        for _ in range(12):
-            angle = random.uniform(0, 2 * math.pi)
-            lasers.append(Laser(WIDTH//2, HEIGHT//2, angle, speed=4, color=GREEN, width=3, length=24))
-    return lasers
-
-LEVEL_PATTERNS = [
-    pattern_simple_radial,
-    pattern_sweeping,
-    pattern_random_burst,
-]
-
 # Main menu state
 MENU = "menu"
 GAME = "game"
@@ -390,6 +335,10 @@ def bullet_hell_game():
     retry_btn = Button("Retry", WIDTH // 2 - btn_width // 2, HEIGHT // 2 + 40, btn_width, btn_height)
     quit_btn = Button("Quit to Menu", WIDTH // 2 - btn_width // 2, HEIGHT // 2 + 120, btn_width, btn_height)
 
+    # Pattern switcher for dynamic laser patterns
+    pattern_switcher = PatternSwitcher(LEVEL_PATTERNS, fps=FPS)
+    lasers = []
+
     while running:
         clock.tick(FPS)
         for event in pygame.event.get():
@@ -426,8 +375,15 @@ def bullet_hell_game():
             keymap = get_key_state(settings)
             player.handle_input(keymap)
             player.update_dash_timer()
-            level.update(player)
-            if player.is_hit(level.lasers):
+            # Update lasers using the pattern switcher
+            pattern_func, pattern_frame = pattern_switcher.get_current_pattern()
+            new_lasers = pattern_func(pattern_frame)
+            if new_lasers:
+                lasers.extend(new_lasers)
+            for laser in lasers:
+                laser.update()
+            # Check for player collisions with lasers
+            if player.is_hit(lasers):
                 player.alive = False
                 death = True
                 death_time = pygame.time.get_ticks()
@@ -436,7 +392,9 @@ def bullet_hell_game():
                 show_death_screen = True
 
         screen.fill((0, 0, 0))
-        level.draw(screen)
+        # Draw lasers and player
+        for laser in lasers:
+            laser.draw(screen)
         player.draw(screen)
 
         if not death and not show_death_screen:
